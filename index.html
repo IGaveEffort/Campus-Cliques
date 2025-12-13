@@ -1555,56 +1555,134 @@
     document.getElementById("year").textContent =
       new Date().getFullYear();
 
-    (function initSmoothAutoScroll() {
-      const rows = document.querySelectorAll(".scroll-row");
-      const tracks = [];
+<script>
+  function scrollToId(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const y = el.getBoundingClientRect().top + window.scrollY - 72;
+    window.scrollTo({ top: y, behavior: "smooth" });
+  }
 
-      rows.forEach((row) => {
-        const track = row.querySelector(".scroll-track");
-        if (!track) return;
+  function toggleFaq(el) {
+    const item = el.closest(".faq-item");
+    if (!item) return;
+    item.classList.toggle("open");
+    const toggle = item.querySelector(".faq-toggle");
+    if (toggle) {
+      toggle.textContent = item.classList.contains("open") ? "−" : "+";
+    }
+  }
 
-        const state = {
-          row,
-          track,
-          baseSpeed: 0.4,
-          currentSpeed: 0.4,
-          targetSpeed: 0.4,
-          offset: 0,
-          width: track.scrollWidth / 2
-        };
+  document.getElementById("year").textContent = new Date().getFullYear();
 
-        tracks.push(state);
+  (function initSmoothAutoScroll() {
+    const rows = document.querySelectorAll(".scroll-row");
+    const tracks = [];
 
-        row.addEventListener("mouseenter", () => {
-          state.targetSpeed = 0;
-        });
+    // Small GPU hint to reduce visual tearing/jitter
+    rows.forEach((row) => {
+      const track = row.querySelector(".scroll-track");
+      if (!track) return;
 
-        row.addEventListener("mouseleave", () => {
-          state.targetSpeed = state.baseSpeed;
-        });
+      track.style.transform = "translate3d(0,0,0)";
+      track.style.backfaceVisibility = "hidden";
+
+      const state = {
+        row,
+        track,
+        baseSpeed: 0.4,
+        currentSpeed: 0.4,
+        targetSpeed: 0.4,
+        offset: 0,   // always kept in [0, loopWidth)
+        loopWidth: 0 // pixel width of the first "set"
+      };
+
+      tracks.push(state);
+
+      row.addEventListener("mouseenter", () => (state.targetSpeed = 0));
+      row.addEventListener("mouseleave", () => (state.targetSpeed = state.baseSpeed));
+    });
+
+    function recalcLoopWidths() {
+      tracks.forEach((s) => {
+        // Assumes the markup is duplicated exactly twice (Set 1 + Set 2)
+        const full = s.track.scrollWidth;
+        s.loopWidth = Math.max(1, full / 2);
+
+        // Keep offset in-range so there's no snap on resize/recalc
+        s.offset = ((s.offset % s.loopWidth) + s.loopWidth) % s.loopWidth;
+        s.track.style.transform = `translate3d(${-s.offset}px, 0, 0)`;
+      });
+    }
+
+    // Recalc after images load (image widths can change scrollWidth after init)
+    function waitForImagesThenRecalc() {
+      const imgs = Array.from(document.images || []);
+      if (!imgs.length) {
+        recalcLoopWidths();
+        return;
+      }
+
+      let pending = 0;
+      imgs.forEach((img) => {
+        if (img.complete) return;
+        pending++;
+        img.addEventListener("load", () => {
+          pending--;
+          if (pending === 0) recalcLoopWidths();
+        }, { once: true });
+        img.addEventListener("error", () => {
+          pending--;
+          if (pending === 0) recalcLoopWidths();
+        }, { once: true });
       });
 
-      function animate() {
-        tracks.forEach((s) => {
-          s.currentSpeed += (s.targetSpeed - s.currentSpeed) * 0.08;
-          s.offset -= s.currentSpeed;
-          if (s.offset <= -s.width) {
-            s.offset += s.width;
-          }
-          s.track.style.transform = `translateX(${s.offset}px)`;
-        });
+      // If all were already complete
+      if (pending === 0) recalcLoopWidths();
+    }
 
-        requestAnimationFrame(animate);
-      }
+    // ResizeObserver keeps loopWidth accurate if layout changes
+    const ro = ("ResizeObserver" in window)
+      ? new ResizeObserver(() => recalcLoopWidths())
+      : null;
 
-      if (tracks.length) {
-        requestAnimationFrame(animate);
-      }
-    })();
+    if (ro) {
+      tracks.forEach((s) => ro.observe(s.track));
+    } else {
+      window.addEventListener("resize", recalcLoopWidths, { passive: true });
+    }
+
+    // Initial measurement (after load-affecting assets)
+    window.addEventListener("load", waitForImagesThenRecalc, { once: true });
+
+    function animate() {
+      tracks.forEach((s) => {
+        if (!s.loopWidth) return;
+
+        // Smoothly ease speed toward targetSpeed
+        s.currentSpeed += (s.targetSpeed - s.currentSpeed) * 0.08;
+
+        // Move forward and wrap seamlessly with modulo (no jump at the seam)
+        s.offset = (s.offset + s.currentSpeed) % s.loopWidth;
+
+        // translate left by offset
+        s.track.style.transform = `translate3d(${-s.offset}px, 0, 0)`;
+      });
+
+      requestAnimationFrame(animate);
+    }
+
+    // Start
+    waitForImagesThenRecalc();
+    if (tracks.length) requestAnimationFrame(animate);
+  })();
+</script>
+
   </script>
 </body>
 
 
 </html>
+
 
 
